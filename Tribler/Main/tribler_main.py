@@ -84,6 +84,7 @@ from Tribler.Utilities.Instance2Instance import Instance2InstanceClient, Instanc
 from Tribler.Utilities.SingleInstanceChecker import SingleInstanceChecker
 from Tribler.dispersy.util import attach_profiler, call_on_reactor_thread
 
+from Tribler.Policies.BoostingManager import BoostingManager
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,8 @@ class ABCApp(object):
             from Tribler.Main.vwxGUI.UserDownloadChoice import UserDownloadChoice
             UserDownloadChoice.get_singleton().set_utility(self.utility)
 
+            self.boosting_manager = BoostingManager.get_instance(s, self.utility)
+
             self.splash.tick('Initializing Family Filter')
             cat = Category.getInstance(session)
 
@@ -205,6 +208,7 @@ class ABCApp(object):
 
             maxup = self.utility.read_config('maxuploadrate')
             maxdown = self.utility.read_config('maxdownloadrate')
+
             # set speed limits using LibtorrentMgr
             s.set_max_upload_speed(maxup)
             s.set_max_download_speed(maxdown)
@@ -759,6 +763,12 @@ class ABCApp(object):
                     modified=changeType == NTFY_MODIFIED)
 
     @forceWxThread
+    def sesscb_ntfy_torrentscrapes(self, subject, changeType, objectID, *args):
+        if self._frame_and_ready() and self.frame.creditmininglist:
+            manager = self.frame.creditmininglist.GetManager()
+            manager.torrentsUpdated([objectID])
+
+    @forceWxThread
     def sesscb_ntfy_torrentupdates(self, events):
         if self._frame_and_ready():
             infohashes = [args[2] for args in events]
@@ -881,6 +891,10 @@ class ABCApp(object):
         if self.webUI:
             self.webUI.stop()
             self.webUI.delInstance()
+
+        if self.boosting_manager:
+            self.boosting_manager.shutdown()
+            self.boosting_manager.del_instance()
 
         if self.frame:
             self.frame.Destroy()

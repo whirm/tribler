@@ -9,52 +9,44 @@
 # see LICENSE.txt for license information
 #
 
-import os
-import sys
-import traceback
-import logging
-import wx
-
-import subprocess
 import atexit
-
+import logging
+import os
+import subprocess
+import sys
 import threading
 import time
+import traceback
 from traceback import print_exc, print_stack
 from urllib import url2pathname
-import copy
+
+import wx
 
 from Tribler.Category.Category import Category
-
-from Tribler.Core.version import version_id
-from Tribler.Core.simpledefs import (NTFY_ACT_NEW_VERSION, NTFY_ACT_NONE, NTFY_ACT_ACTIVE, NTFY_ACT_UPNP,
-                                     NTFY_ACT_REACHABLE, NTFY_ACT_MEET, NTFY_ACT_GET_EXT_IP_FROM_PEERS,
-                                     NTFY_ACT_GOT_METADATA, NTFY_ACT_RECOMMEND, NTFY_ACT_DISK_FULL)
-from Tribler.Core.exceptions import DuplicateDownloadException
 from Tribler.Core.TorrentDef import TorrentDef, TorrentDefNoMetainfo
-from Tribler.Core.Utilities.utilities import parse_magnetlink, fix_torrent
-
-from Tribler.Main.globals import DefaultDownloadStartupConfig
-from Tribler.Main.Utility.GuiDBHandler import startWorker
-
+from Tribler.Core.Utilities.utilities import fix_torrent, parse_magnetlink
+from Tribler.Core.Video.utils import videoextdefaults
+from Tribler.Core.exceptions import DuplicateDownloadException
+from Tribler.Core.simpledefs import (NTFY_ACT_ACTIVE, NTFY_ACT_DISK_FULL, NTFY_ACT_GET_EXT_IP_FROM_PEERS,
+                                     NTFY_ACT_GOT_METADATA, NTFY_ACT_MEET, NTFY_ACT_NEW_VERSION, NTFY_ACT_NONE,
+                                     NTFY_ACT_REACHABLE, NTFY_ACT_RECOMMEND, NTFY_ACT_UPNP)
+from Tribler.Core.version import version_id
 from Tribler.Main.Dialogs.ConfirmationDialog import ConfirmationDialog
 from Tribler.Main.Dialogs.FeedbackWindow import FeedbackWindow
-from Tribler.Main.Dialogs.systray import ABCTaskBarIcon
 from Tribler.Main.Dialogs.SaveAs import SaveAs
-
-from Tribler.Main.vwxGUI.GuiUtility import GUIUtility, forceWxThread
+from Tribler.Main.Dialogs.systray import ABCTaskBarIcon
+from Tribler.Main.Utility.GuiDBHandler import startWorker
+from Tribler.Main.globals import DefaultDownloadStartupConfig
 from Tribler.Main.vwxGUI import DEFAULT_BACKGROUND, SEPARATOR_GREY
-from Tribler.Main.vwxGUI.list import SearchList, ChannelList, LibraryList, ActivitiesList
-from Tribler.Main.vwxGUI.list_details import (SearchInfoPanel, ChannelInfoPanel, LibraryInfoPanel, PlaylistInfoPanel,
-                                              SelectedchannelInfoPanel, TorrentDetails, LibraryDetails, ChannelDetails,
-                                              PlaylistDetails)
-from Tribler.Main.vwxGUI.TopSearchPanel import TopSearchPanel
-from Tribler.Main.vwxGUI.home import Home, Stats, NetworkGraphPanel
-from Tribler.Main.vwxGUI.channel import SelectedChannelList, Playlist, ManageChannel
+from Tribler.Main.vwxGUI.GuiUtility import GUIUtility, forceWxThread
 from Tribler.Main.vwxGUI.SRstatusbar import SRstatusbar
-
-from Tribler.Core.Video.utils import videoextdefaults
-
+from Tribler.Main.vwxGUI.TopSearchPanel import TopSearchPanel
+from Tribler.Main.vwxGUI.channel import ManageChannel, Playlist, SelectedChannelList
+from Tribler.Main.vwxGUI.home import Home, NetworkGraphPanel, Stats
+from Tribler.Main.vwxGUI.list import ActivitiesList, ChannelList, CreditMiningList, LibraryList, SearchList
+from Tribler.Main.vwxGUI.list_details import (ChannelDetails, ChannelInfoPanel, LibraryDetails, LibraryInfoPanel,
+                                              PlaylistDetails, PlaylistInfoPanel, SearchInfoPanel,
+                                              SelectedchannelInfoPanel, TorrentDetails)
 
 #
 #
@@ -186,6 +178,8 @@ class MainFrame(wx.Frame):
         self.searchlist.Show(False)
         self.librarylist = LibraryList(self.splitter_top_window)
         self.librarylist.Show(False)
+        self.creditmininglist = CreditMiningList(self)
+        self.creditmininglist.Show(False)
         self.channellist = ChannelList(self.splitter_top_window)
         self.channellist.Show(False)
         self.selectedchannellist = SelectedChannelList(self.splitter_top_window)
@@ -235,6 +229,9 @@ class MainFrame(wx.Frame):
             event.Skip()
         self.splitter.Bind(wx.EVT_SHOW, OnShowSplitter)
 
+        self.creditmininglist = CreditMiningList(self)
+        self.creditmininglist.Show(False)
+
         self.stats = Stats(self)
         self.stats.Show(False)
         self.managechannel = ManageChannel(self)
@@ -258,6 +255,7 @@ class MainFrame(wx.Frame):
         hSizer.Add(self.stats, 1, wx.EXPAND)
         hSizer.Add(self.networkgraph, 1, wx.EXPAND)
         hSizer.Add(self.splitter, 1, wx.EXPAND)
+        hSizer.Add(self.creditmininglist, 1, wx.EXPAND)
 
         hSizer.Add(self.managechannel, 1, wx.EXPAND)
 

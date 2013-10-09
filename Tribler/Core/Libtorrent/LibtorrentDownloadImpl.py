@@ -124,6 +124,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         self.all_time_download = 0.0
         self.all_time_ratio = 0.0
         self.finished_time = 0.0
+        self.added_time = 0.0
         self.done = False
         self.pause_after_next_hashcheck = False
         self.checkpoint_after_next_hashcheck = False
@@ -143,7 +144,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
     def get_def(self):
         return self.tdef
 
-    def setup(self, dcfg=None, pstate=None, initialdlstatus=None, lm_network_engine_wrapper_created_callback=None, wrapperDelay=0):
+    def setup(self, dcfg=None, pstate=None, initialdlstatus=None, lm_network_engine_wrapper_created_callback=None, wrapperDelay=0, share_mode=False):
         """
         Create a Download object. Used internally by Session.
         @param dcfg DownloadStartupConfig or None (in which case
@@ -170,8 +171,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
                 self._logger.debug(u"setup: initialdlstatus %s %s", hexlify(self.tdef.get_infohash()), initialdlstatus)
 
-                self.create_engine_wrapper(lm_network_engine_wrapper_created_callback, pstate,
-                                           initialdlstatus=initialdlstatus, wrapperDelay=wrapperDelay)
+                self.create_engine_wrapper(lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=initialdlstatus, wrapperDelay=wrapperDelay, share_mode=share_mode)
 
             self.pstate_for_restart = pstate
 
@@ -180,7 +180,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
                 self.error = e
                 print_exc()
 
-    def create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None, wrapperDelay=0):
+    def create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None, wrapperDelay=0, share_mode=False):
         with self.dllock:
             if not self.cew_scheduled:
                 self.ltmgr = self.session.lm.ltmgr
@@ -193,16 +193,16 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
                 if not self.ltmgr or not dht_ok or not session_ok:
                     self._logger.info(u"LTMGR/DHT/session not ready, rescheduling create_engine_wrapper")
                     create_engine_wrapper_lambda = lambda: self.create_engine_wrapper(
-                        lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=initialdlstatus)
+                        lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=initialdlstatus, share_mode=share_mode)
                     self.session.lm.threadpool.add_task(create_engine_wrapper_lambda, 5)
                     self.dlstate = DLSTATUS_CIRCUITS if not session_ok else DLSTATUS_METADATA
                 else:
                     network_create_engine_wrapper_lambda = lambda: self.network_create_engine_wrapper(
-                        lm_network_engine_wrapper_created_callback, pstate, initialdlstatus)
+                        lm_network_engine_wrapper_created_callback, pstate, initialdlstatus, share_mode=share_mode)
                     self.session.lm.threadpool.add_task(network_create_engine_wrapper_lambda, wrapperDelay)
                     self.cew_scheduled = True
 
-    def network_create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None):
+    def network_create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None, share_mode=False):
         # Called by any thread, assume dllock already acquired
         self._logger.debug("LibtorrentDownloadImpl: create_engine_wrapper()")
 
@@ -213,6 +213,9 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         atp["auto_managed"] = False
         atp["duplicate_is_error"] = True
         atp["hops"] = self.get_hops()
+
+        if share_mode:
+            atp["flags"] = lt.add_torrent_params_flags_t.flag_share_mode
 
         resume_data = pstate.get('state', 'engineresumedata') if pstate else None
         if not isinstance(self.tdef, TorrentDefNoMetainfo):
@@ -239,8 +242,9 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
             has_resume_data = resume_data and isinstance(resume_data, dict)
             if has_resume_data:
                 atp["resume_data"] = lt.bencode(resume_data)
-            self._logger.info("%s %s", self.tdef.get_name_as_unicode(), dict((k, v)
-                              for k, v in resume_data.iteritems() if k not in ['pieces', 'piece_priority', 'peers']) if has_resume_data else None)
+            if not share_mode:
+                self._logger.info("%s %s", self.tdef.get_name_as_unicode(), dict((k, v)
+                                for k, v in resume_data.iteritems() if k not in ['pieces', 'piece_priority', 'peers']) if has_resume_data else None)
         else:
             atp["url"] = self.tdef.get_url() or "magnet:?xt=urn:btih:" + hexlify(self.tdef.get_infohash())
             atp["name"] = self.tdef.get_name_as_unicode()
@@ -249,6 +253,13 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
         if self.handle:
             self.set_selected_files()
+
+            # set_selected_files sets priorities to 1, so we must set
+            # share_mode again, but first we must unset it, otherwise
+            # set_share_mode doesn't do anything
+            if share_mode:
+                self.handle.set_share_mode(not share_mode)
+                self.handle.set_share_mode(share_mode)
 
             # If we lost resume_data always resume download in order to force checking
             if initialdlstatus != DLSTATUS_STOPPED or not resume_data:
@@ -304,6 +315,10 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         if self.vod_index is not None:
             return self.vod_index
         return -1
+
+    @checkHandleAndSynchronize(None)
+    def write_resume_data(self):
+        return self.handle.write_resume_data()
 
     @checkHandleAndSynchronize(0)
     def get_vod_filesize(self):
@@ -535,6 +550,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         if status.all_time_download:
             self.all_time_ratio = status.all_time_upload / float(status.all_time_download)
         self.finished_time = status.finished_time
+        self.added_time = status.added_time
 
         self._stop_if_finished()
 
@@ -685,6 +701,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         seeding_stats['total_down'] = self.all_time_download
         seeding_stats['ratio'] = self.all_time_ratio
         seeding_stats['time_seeding'] = self.finished_time
+        seeding_stats['time_started'] = self.added_time
 
         logmsgs = []
 
@@ -970,7 +987,10 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         else:
             pstate.set('state', 'metainfo', self.tdef.get_metainfo())
 
-        ds = self.network_get_state(None, False)
+        if self.get_share_mode():
+            pstate.set('state', 'share_mode', True)
+
+        ds = self.network_get_state(None, False, sessioncalling=True)
         dlstate = {'status': ds.get_status(), 'progress': ds.get_progress(), 'swarmcache': None}
         pstate.set('state', 'dlstate', dlstate)
 
@@ -1004,6 +1024,10 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         """
         self.handle.connect_peer(addr, 0)
 
+    @waitForHandleAndSynchronize()
+    def set_priority(self, prio):
+        self.handle.set_priority(prio)
+
     @waitForHandleAndSynchronize(True)
     def dlconfig_changed_callback(self, section, name, new_value, old_value):
         if section == 'downloadconfig' and name == 'max_upload_rate':
@@ -1013,6 +1037,14 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         elif section == 'downloadconfig' and name in ['correctedfilename', 'super_seeder']:
             return False
         return True
+
+    def get_share_mode(self):
+        if self.handle:
+            return self.handle.status().share_mode
+
+    @checkHandleAndSynchronize
+    def set_share_mode(self, share_mode):
+        self.handle.set_share_mode(share_mode)
 
 
 class LibtorrentStatisticsResponse:

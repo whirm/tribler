@@ -228,3 +228,4 @@ tribler_defaults['Tribler']['i2ilistenport'] = 57891
 tribler_defaults['Tribler']['mintray'] = 2 if sys.platform == 'win32' else 0
 tribler_defaults['Tribler']['free_space_threshold'] = 100 * 1024 * 1024
 tribler_defaults['Tribler']['version_info'] = {}
+tribler_defaults['Tribler']['boosting_sources'] = ""

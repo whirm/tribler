@@ -252,7 +252,7 @@ class TriblerLaunchMany(TaskManager):
 
         self.initComplete = True
 
-    def add(self, tdef, dscfg, pstate=None, initialdlstatus=None, setupDelay=0, hidden=False):
+    def add(self, tdef, dscfg, pstate=None, initialdlstatus=None, setupDelay=0, hidden=False, share_mode=False):
         """ Called by any thread """
         d = None
         self.sesslock.acquire()
@@ -278,7 +278,7 @@ class TriblerLaunchMany(TaskManager):
             # Store in list of Downloads, always.
             self.downloads[infohash] = d
             d.setup(dscfg, pstate, initialdlstatus, self.network_engine_wrapper_created_callback,
-                    wrapperDelay=setupDelay)
+                    wrapperDelay=setupDelay, share_mode=share_mode)
 
         finally:
             self.sesslock.release()

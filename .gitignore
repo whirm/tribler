@@ -1,6 +1,7 @@
 *.bak
 *.pyc
 *.pyo
+*.swp
 *~
 .DS_Store
 .ropeproject
@@ -24,9 +25,10 @@
 /debian/tribler/
 /output
 \#*\#
-\.\#
+\.\#*
 flycheck_*
 memorydump.out
+pylintrc
 test_file
 test_file.torrent
 

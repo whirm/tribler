@@ -228,6 +228,27 @@ class GUIUtility(object):
                 # Hide list
                 self.frame.librarylist.Show(False)
 
+            if page == 'creditmining':
+                # Show list
+                self.frame.creditmininglist.Show(True)
+
+                # Open infohash
+                if args:
+                    self.frame.creditmininglist.GetManager().refresh_or_expand(args[0])
+                else:
+                    items = self.frame.creditmininglist.GetExpandedItems()
+                    if items:
+                        items[0][1].expanded = False
+                        self.frame.creditmininglist.Select(items[0][0])
+
+                # Open infohash
+                if args:
+                    self.frame.creditmininglist.GetManager().refresh_or_expand(args[0])
+
+            elif self.guiPage == 'creditmining':
+                # Hide list
+                self.frame.creditmininglist.Show(False)
+
             if page == 'home':
                 self.frame.home.ResetSearchBox()
                 self.frame.home.Show()
@@ -268,6 +289,8 @@ class GUIUtility(object):
             self.frame.selectedchannellist.Focus()
         elif page == 'my_files':
             self.frame.librarylist.Focus()
+        elif page == 'creditmining':
+            self.frame.creditmininglist.Focus()
 
     def GetSelectedPage(self):
         if self.guiPage == 'home':
@@ -293,6 +316,9 @@ class GUIUtility(object):
 
         if self.guiPage == 'my_files':
             return self.frame.librarylist
+
+        if self.guiPage == 'creditmining':
+            return self.frame.creditmininglist
 
     def SetTopSplitterWindow(self, window=None, show=True):
         while self.frame.splitter_top.GetChildren():
@@ -533,7 +559,8 @@ class GUIUtility(object):
             'selectedchannel': self.frame.selectedchannellist,
             'mychannel': self.frame.managechannel,
             'search_results': self.frame.searchlist,
-            'my_files': self.frame.librarylist}
+            'my_files': self.frame.librarylist,
+            'creditmining': self.frame.creditmininglist}
         if self.guiPage in lists and lists[self.guiPage].HasFocus():
             lists[self.guiPage].ScrollToEnd(goto_end)
         elif event:
@@ -545,7 +572,8 @@ class GUIUtility(object):
             'selectedchannel': self.frame.selectedchannellist,
             'mychannel': self.frame.managechannel,
             'search_results': self.frame.searchlist,
-            'my_files': self.frame.librarylist}
+            'my_files': self.frame.librarylist,
+            'creditmining': self.frame.creditmininglist}
         if self.guiPage in lists:
             lists[self.guiPage].ScrollToId(id)
 
