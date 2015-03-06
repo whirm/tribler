@@ -12,11 +12,11 @@ from nose.tools import timed
 from Tribler.Core.DecentralizedTracking.pymdht.core.identifier import Id
 from Tribler.Core.Utilities.twisted_thread import reactor
 from Tribler.Core.simpledefs import dlstatus_strings
-from Tribler.Test.test_as_server import TestGuiAsServer, BASE_DIR
+from Tribler.Test.test_as_server import BASE_DIR, TestGuiAsServer
+from Tribler.community.tunnel.hidden_community import HiddenTunnelCommunity
+from Tribler.community.tunnel.tunnel_community import TunnelSettings
 from Tribler.dispersy.candidate import Candidate
 from Tribler.dispersy.util import blockingCallFromThread
-from Tribler.community.tunnel.tunnel_community import TunnelSettings
-from Tribler.community.tunnel.hidden_community import HiddenTunnelCommunity
 
 
 class TestTunnelCommunity(TestGuiAsServer):
@@ -215,8 +215,8 @@ class TestTunnelCommunity(TestGuiAsServer):
         self.startTest(setup_seeder)
 
     def startTest(self, callback, min_timeout=5):
-        from Tribler.Main import tribler_main
-        tribler_main.FORCE_ENABLE_TUNNEL_COMMUNITY = True
+        from Tribler.Main.vwxGUI import wxgui_component
+        wxgui_component.FORCE_ENABLE_TUNNEL_COMMUNITY = True
 
         self.getStateDir()  # getStateDir copies the bootstrap file into the statedir
 

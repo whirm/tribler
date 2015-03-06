@@ -1,6 +1,11 @@
 # Written by Arno Bakker, Jie Yang
 # Improved and Modified by Niels Zeilemaker
 # see LICENSE.txt for license information
+if True:
+    import wxversion
+    wxversion.select("2.8-unicode")
+    import wx
+
 import functools
 import gc
 import inspect
@@ -12,13 +17,18 @@ import sys
 import time
 import unittest
 from threading import enumerate as enumerate_threads
+from time import sleep
 from traceback import print_exc
 
-# set wxpython version before importing wx or anything from Tribler
-import wxversion
-wxversion.select("2.8-unicode")
 
-import wx
+from twisted.internet.defer import inlineCallbacks
+from Tribler.Main.tribler_main import SessionRunner
+from Tribler.Core.Upgrade.upgradercomponent import UpgraderComponent
+from Tribler.Main.vwxGUI.wxgui_component import WxGUIComponent
+from Tribler.Main.vwxGUI.wxgui_component import WxGUIComponent
+from Tribler.dispersy.util import blocking_call_on_reactor_thread
+# from Tribler.Main.tribler_main import SessionRunner
+from Tribler.Main.vwxGUI import forceAndReturnWxThread
 
 from Tribler.Core import defaults
 from Tribler.Core.Session import Session
@@ -93,9 +103,9 @@ class AbstractServer(BaseTestCase):
 
         delayed_calls = reactor.getDelayedCalls()
         if delayed_calls:
-            self._logger.debug("The reactor was dirty:")
+            self._logger.critical("The reactor was dirty:")
             for dc in delayed_calls:
-                self._logger.debug(">     %s" % dc)
+                self._logger.critical(">     %s" % dc)
         self.assertFalse(delayed_calls, "The reactor was dirty when tearing down the test")
 
     def tearDownCleanup(self):
@@ -270,12 +280,13 @@ class TestGuiAsServer(TestAsServer):
     Parent class for testing the gui-side of Tribler
     """
 
+    def __init__(self, *argv, **kwargs):
+        super(TestGuiAsServer, self).__init__(*argv, **kwargs)
+
+        self.sessrunner = None
+
     def setUp(self):
         AbstractServer.setUp(self, annotate=False)
-
-        self.app = wx.GetApp()
-        if not self.app:
-            self.app = wx.PySimpleApp(redirect=False)
 
         self.guiUtility = None
         self.frame = None
@@ -296,10 +307,13 @@ class TestGuiAsServer(TestAsServer):
                 assert boolean, reason
 
     def startTest(self, callback, min_timeout=5, autoload_discovery=True):
+
         from Tribler.Main.vwxGUI.GuiUtility import GUIUtility
         from Tribler.Main import tribler_main
         tribler_main.ALLOW_MULTIPLE = True
-        tribler_main.SKIP_TUNNEL_DIALOG = True
+
+        from Tribler.Core.Upgrade import upgradercomponent
+        upgradercomponent.SKIP_TUNNEL_DIALOG = True
 
         self.hadSession = False
         starttime = time.time()
@@ -333,22 +347,45 @@ class TestGuiAsServer(TestAsServer):
             self.hadSession = True
             self.CallConditional(30, lambda: self.session.lm and self.session.lm.initComplete, wait_for_guiutility)
 
-        self._logger.debug("waiting for session instance")
-        self.CallConditional(30, Session.has_instance, lambda: TestAsServer.startTest(self, wait_for_instance))
-
         # modify argv to let tribler think its running from a different directory
         sys.argv = [os.path.abspath('./.exe')]
-        tribler_main.run(autoload_discovery=autoload_discovery)
 
-        assert self.hadSession, 'Did not even create a session'
+        def do_wait():
+            self._logger.info("waiting for session instance")
+            self.CallConditional(30, Session.has_instance, lambda: TestAsServer.startTest(self, wait_for_instance))
+            def stuff():
+            wx.CallAfter(stuff)
+
+        reactor.callLater(1, do_wait)
+
+
+        self.sessrunner = SessionRunner()
+        self.sessrunner.run(autoload_discovery=autoload_discovery)
+
+        #self.sessrunner = SessionRunner()
+        # TODO(emilon): Remember to do the autoload_discovery thing!!!!!
+        #self.sessrunner.run(async=True)
+        # for _ in xrange(100):
+        #     sleep(0.1)
+        #     # TODO(emilon): This needs to be done in a nicer way when the refactor is over
+        #     if self.sessrunner.app:
+        #         self.app = self.sessrunner.app
+        #         break
+        self.assertTrue(self.session, "Did not even create a session")
+        self.assertTrue(self.sessrunner.getComponent("WxGUIComponent").startup_d.called, "GUI didn't initialize completely")
 
     def Call(self, seconds, callback):
+        #assert wx.GetApp().IsMainLoopRunning()
+        self._logger.critical("Callllllllllllllll %s", callback)
         if not self.quitting:
             if seconds:
+                self._logger.critical("LATER")
                 wx.CallLater(seconds * 1000, callback)
-            elif not wx.Thread_IsMain():
+            elif not (wx.GetApp().IsMainLoopRunning() and wx.Thread_IsMain()):
+                self._logger.critical("OTHERTHREAD")
                 wx.CallAfter(callback)
             else:
+                self._logger.critical("THIS THREAD")
                 callback()
 
     def quit(self):
@@ -356,24 +393,17 @@ class TestGuiAsServer(TestAsServer):
             self.frame.OnCloseWindow()
 
         else:
-            def close_dialogs():
-                for item in wx.GetTopLevelWindows():
-                    if isinstance(item, wx.Dialog):
-                        if item.IsModal():
-                            item.EndModal(wx.ID_CANCEL)
-                        else:
-                            item.Destroy()
+            for item in wx.GetTopLevelWindows():
+                if isinstance(item, wx.Dialog):
+                    if item.IsModal():
+                        item.EndModal(wx.ID_CANCEL)
                     else:
-                        item.Close()
+                        item.Destroy()
+                else:
+                    item.Close()
 
-            def do_quit():
-                self.app.ExitMainLoop()
-                wx.WakeUpMainThread()
 
-            self.Call(1, close_dialogs)
-            self.Call(2, do_quit)
-            self.Call(3, self.app.Exit)
-
+        self.sessrunner.stop()
         self.quitting = True
 
     def tearDown(self):

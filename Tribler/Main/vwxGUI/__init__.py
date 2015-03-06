@@ -105,11 +105,13 @@ def showError(textCtrl):
 
 def warnWxThread(func):
     def invoke_func(*args, **kwargs):
+        #assert wx.GetApp().IsMainLoopRunning()
         if not wx.Thread_IsMain():
             caller = inspect.stack()[1]
             callerstr = "%s %s:%s" % (caller[3], caller[1], caller[2])
-            logger.warn("%s NOT ON GUITHREAD %s %s:%s called by %s", long(time()),
-                        func.__name__, func.func_code.co_filename, func.func_code.co_firstlineno, callerstr)
+            logger.exception("NOT ON GUITHREAD ML:%s %s %s:%s called by %s", wx.GetApp().IsMainLoopRunning(),
+                                                                          func.__name__, func.func_code.co_filename,
+                                                                          func.func_code.co_firstlineno, callerstr)
 
         return func(*args, **kwargs)
 
@@ -134,6 +136,7 @@ def forceWxThread(func):
 
 
 def forceAndReturnWxThread(func):
+    assert wx.GetApp() and wx.GetApp().IsMainLoopRunning(), "%s %s" % (wx.GetApp(), (wx.GetApp() and wx.GetApp().IsMainLoopRunning()))
     def invoke_func(*args, **kwargs):
         if wx.Thread_IsMain():
             return func(*args, **kwargs)
@@ -156,7 +159,7 @@ def forceAndReturnWxThread(func):
                     event.set()
 
             wx.CallAfter(wx_thread)
-            if event.wait(15) or event.isSet():
+            if event.wait(60) or event.isSet():
                 return result[0]
 
             from traceback import print_stack

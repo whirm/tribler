@@ -6,7 +6,7 @@ import os
 import logging
 from traceback import print_exc, print_stack
 from threading import currentThread
-
+import wx
 from Tribler.Core.Video.defs import MEDIASTATE_ENDED, MEDIASTATE_STOPPED, MEDIASTATE_PLAYING, MEDIASTATE_PAUSED
 
 VLC_MAXVOLUME = 200  # Also for 0.3
@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 def check_threading(func):
     def invoke_func(*args, **kwargs):
-        if currentThread().getName() != "MainThread":
-            raise Exception("VLCWrapper: Thread violation!")
+        if not wx.Thread_IsMain() and not (wx.GetApp() and wx.GetApp().IsMainLoopRunning()) :
+            raise Exception("VLCWrapper: Thread violation! %s %s" % (wx.GetApp(), (wx.GetApp() and wx.GetApp().IsMainLoopRunning())))
 
         return func(*args, **kwargs)
 
@@ -34,7 +34,7 @@ class VLCWrapper(object):
     each time to create a VLCWindow.
     """
 
-    @check_threading
+
     def __init__(self):
         self._logger = logging.getLogger(self.__class__.__name__)
 
@@ -45,6 +45,7 @@ class VLCWrapper(object):
         self.initialized = False
         self.is_shutting_down = False
 
+    @check_threading
     def _init_vlc(self):
         """
         To avoid a bug on Ubuntu Intrepid and Jaunty that causes the

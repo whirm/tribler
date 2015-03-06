@@ -12,15 +12,17 @@ from collections import defaultdict
 from threading import RLock
 
 from Tribler.Core.CacheDB.Notifier import Notifier
-from Tribler.Core.simpledefs import NTFY_TORRENTS, NTFY_VIDEO_STARTED, DLMODE_NORMAL, NTFY_VIDEO_BUFFERING
 from Tribler.Core.Libtorrent.LibtorrentDownloadImpl import VODFile
-
-from Tribler.Core.Video.utils import (win32_retrieve_video_play_command, quote_program_path, escape_path,
-                                      return_feasible_playback_modes)
-from Tribler.Core.Video.defs import PLAYBACKMODE_INTERNAL, PLAYBACKMODE_EXTERNAL_MIME
-from Tribler.Core.Video.VideoUtility import get_videoinfo
-from Tribler.Core.Video.VideoServer import VideoServer
 from Tribler.Core.Video.VLCWrapper import VLCWrapper
+from Tribler.Core.Video.VideoServer import VideoServer
+from Tribler.Core.Video.VideoUtility import get_videoinfo
+from Tribler.Core.Video.defs import PLAYBACKMODE_EXTERNAL_MIME, \
+    PLAYBACKMODE_INTERNAL
+from Tribler.Core.Video.utils import escape_path, quote_program_path, \
+    return_feasible_playback_modes, win32_retrieve_video_play_command
+from Tribler.Core.simpledefs import DLMODE_NORMAL, NTFY_TORRENTS, \
+    NTFY_VIDEO_BUFFERING, NTFY_VIDEO_STARTED
+from Tribler.Main.vwxGUI import forceAndReturnWxThread, forceWxThread
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +50,11 @@ class VideoPlayer(object):
         feasible = return_feasible_playback_modes()
         preferredplaybackmode = self.session.get_preferred_playback_mode()
         self.playbackmode = preferredplaybackmode if preferredplaybackmode in feasible else feasible[0]
-        self.vlcwrap = VLCWrapper() if self.playbackmode == PLAYBACKMODE_INTERNAL else None
+
+        if self.playbackmode == PLAYBACKMODE_INTERNAL:
+            self.vlcwrap = VLCWrapper()
+        else:
+            self.vlcwrap = None
 
         # Start HTTP server for serving video
         self.videoserver = VideoServer.getInstance(httpport or self.session.get_videoplayer_port(), self.session)

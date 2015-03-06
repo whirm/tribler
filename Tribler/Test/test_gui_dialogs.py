@@ -83,6 +83,7 @@ class TestGuiDialogs(TestGuiAsServer):
 
     def test_save_dialog(self):
         def do_assert(add_dialog):
+            assert wx.GetApp().IsMainLoopRunning()
             dialog = wx.FindWindowByName('SaveAsDialog')
             self.assert_(isinstance(dialog, SaveAs), 'could not find SaveAs')
 

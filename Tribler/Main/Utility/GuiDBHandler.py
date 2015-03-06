@@ -225,6 +225,7 @@ class MySenderWxEvent(MySender, SenderWxEvent):
 class MySenderCallAfter(MySender, SenderCallAfter):
 
     def __init__(self, listener, delayedResult, jobID=None, args=(), kwargs={}):
+        self._listener = listener
         SenderCallAfter.__init__(self, listener, jobID, args, kwargs)
         MySender.__init__(self, delayedResult)
 

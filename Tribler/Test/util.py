@@ -83,7 +83,7 @@ class UnhandledExceptionCatcher(object):
 
         self._register_exception_line("Locals by frame, innermost last:")
         for frame in stack:
-            self._register_exception_line("%s:%s %s:", frame.f_code.co_filename,
+            self._register_exception_line('File "%s", line %s, in %s', frame.f_code.co_filename,
                                           frame.f_lineno, frame.f_code.co_name)
             for key, value in frame.f_locals.items():
                 value = repr_(value)

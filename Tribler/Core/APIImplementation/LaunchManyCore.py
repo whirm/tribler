@@ -27,6 +27,7 @@ from Tribler.Main.globals import DefaultDownloadStartupConfig
 from Tribler.dispersy.util import blockingCallFromThread
 from Tribler.dispersy.endpoint import RawserverEndpoint
 
+from time import sleep
 
 try:
     prctlimported = True
@@ -69,6 +70,7 @@ class TriblerLaunchMany(Thread):
         self.session = None
         self.sesslock = None
         self.sessdoneflag = Event()
+        self.rawserver_close_flag = Event()
 
         self.shutdownstarttime = None
 
@@ -413,6 +415,8 @@ class TriblerLaunchMany(Thread):
         finally:
             self.stop_upnp()
             self.rawserver.shutdown()
+            sleep(2)
+            self.rawserver_close_flag.set()
 
     #
     # State retrieval
@@ -708,6 +712,7 @@ class TriblerLaunchMany(Thread):
 
         # Stop network thread
         self.sessdoneflag.set()
+        self.rawserver_close_flag.wait()
 
         # Arno, 2010-08-09: Stop Session pool threads only after gracetime
         self.session.uch.shutdown()

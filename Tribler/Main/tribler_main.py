@@ -40,12 +40,21 @@ urllib.URLopener.open_https = original_open_https
 import Tribler.Debug.console
 
 import os
-from Tribler.Main.Utility.GuiDBHandler import startWorker, GUIDBProducer
-from Tribler.dispersy.util import attach_profiler, call_on_reactor_thread
-from Tribler.community.bartercast3.community import MASTER_MEMBER_PUBLIC_KEY_DIGEST as BARTER_MASTER_MEMBER_PUBLIC_KEY_DIGEST
-from Tribler.Core.CacheDB.Notifier import Notifier
 import traceback
+from collections import OrderedDict
 from random import randint
+
+from twisted.internet.defer import inlineCallbacks, returnValue
+
+from Tribler.Core.CacheDB.Notifier import Notifier
+from Tribler.Core.Upgrade.upgradercomponent import UpgraderComponent
+from Tribler.Main.Utility.GuiDBHandler import GUIDBProducer, startWorker
+from Tribler.community.bartercast3.community import \
+    MASTER_MEMBER_PUBLIC_KEY_DIGEST as BARTER_MASTER_MEMBER_PUBLIC_KEY_DIGEST
+from Tribler.dispersy.util import attach_profiler, \
+    blocking_call_on_reactor_thread, call_on_reactor_thread
+
+
 try:
     prctlimported = True
     import prctl
@@ -136,15 +145,19 @@ FORCE_ENABLE_TUNNEL_COMMUNITY = False
 #
 #
 
-
 class ABCApp(object):
+    # TODO(emilon): this autoload discovery should be moved to whatever starts the session now
 
-    def __init__(self, params, installdir, autoload_discovery=True):
+    def __init__(self, app, params, installdir=None, session=None, autoload_discovery=True):
         assert not isInIOThread(), "isInIOThread() seems to not be working correctly"
+        #assert wx.Thread_IsMain()
         self._logger = logging.getLogger(self.__class__.__name__)
 
+        assert session
+        self.app = app
         self.params = params
-        self.installdir = installdir
+        self.installdir = installdir or self.determine_install_dir()
+        self.session = session
 
         self.state_dir = None
         self.error = None
@@ -172,21 +185,33 @@ class ABCApp(object):
         self.utility = None
 
         # Stage 1 start
-        session = self.InitStage1(installdir, autoload_discovery=autoload_discovery)
-
         self.splash = None
+
+
         try:
+            self.gui_image_manager = GuiImageManager.getInstance(self.installdir)
+
             bm = self.gui_image_manager.getImage(u'splash.png')
             self.splash = GaugeSplash(bm, "Loading...", 13)
             self.splash.Show()
+            wx.CallAfter(self.start)
 
+        except Exception as e:
+            print_exc()
+            if self.splash:
+                self.splash.Destroy()
+
+            self.onError(e)
+
+    def start(self):
+        try:
             self._logger.info('Client Starting Up.')
             self._logger.info("Tribler is using %s as working directory", self.installdir)
 
-            # Stage 2: show the splash window and start the session
+            # Stage 2: show the splash window and start the self.session
 
             self.splash.tick('Starting API')
-            s = self.startAPI(session, self.splash.tick)
+            s = self.startAPI(self.session, self.splash.tick)
 
             self.utility = Utility(self.installdir, s.get_state_dir())
             self.utility.app = self
@@ -202,7 +227,6 @@ class ABCApp(object):
                 version_info['first_run'] = int(time())
                 version_info['version_id'] = version_id
                 self.utility.write_config('version_info', version_info)
-
             self.splash.tick('Starting session and upgrading database (it may take a while)')
             s.start()
             self.dispersy = s.lm.dispersy
@@ -268,12 +292,8 @@ class ABCApp(object):
                                                     'tribler.ico'),
                                        wx.BITMAP_TYPE_ICO))
 
-            # Arno, 2011-06-15: VLC 1.1.10 pops up separate win, don't have two.
-            self.frame.videoframe = None
-            if PLAYBACKMODE_INTERNAL in return_feasible_playback_modes():
-                vlcwrap = s.lm.videoplayer.get_vlcwrap()
-                wx.CallLater(3000, vlcwrap._init_vlc)
-                self.frame.videoframe = VideoDummyFrame(self.frame.videoparentpanel, self.utility, vlcwrap)
+            self.app.SetTopWindow(self.frame)
+            self.frame.set_wxapp(self.app)
 
             if sys.platform == 'win32':
                 wx.CallAfter(self.frame.top_bg.Refresh)
@@ -287,7 +307,6 @@ class ABCApp(object):
                 bmphand = None
                 hands = wx.Image.GetHandlers()
                 for hand in hands:
-                    # print "Handler",hand.GetExtension(),hand.GetType(),hand.GetMimeType()
                     if hand.GetMimeType() == 'image/x-bmp':
                         bmphand = hand
                         break
@@ -297,6 +316,16 @@ class ABCApp(object):
             except:
                 # wx < 2.7 don't like wx.Image.GetHandlers()
                 print_exc()
+
+            # This needs to be called after the mainloop starts as vlc.py checks if
+            # it's running on the wx thread.
+
+            # Arno, 2011-06-15: VLC 1.1.10 pops up separate win, don't have two.
+            self.frame.videoframe = None
+            if PLAYBACKMODE_INTERNAL in return_feasible_playback_modes():
+                vlcwrap = self.session.lm.videoplayer.get_vlcwrap()
+                wx.CallLater(3000, vlcwrap._init_vlc)
+                self.frame.videoframe = VideoDummyFrame(self.frame.videoparentpanel, self.utility, vlcwrap)
 
             self.splash.Destroy()
             self.frame.Show(True)
@@ -325,111 +354,16 @@ class ABCApp(object):
             self.ready = True
 
         except Exception as e:
+            print_exc()
             if self.splash:
                 self.splash.Destroy()
 
             self.onError(e)
 
+
     def InitStage1(self, installdir, autoload_discovery=True):
         """ Stage 1 start: pre-start the session to handle upgrade.
         """
-        self.gui_image_manager = GuiImageManager.getInstance(installdir)
-
-        # Start Tribler Session
-        defaultConfig = SessionStartupConfig()
-        state_dir = defaultConfig.get_state_dir()
-        cfgfilename = Session.get_default_config_filename(state_dir)
-
-        self._logger.debug(u"Session config %s", cfgfilename)
-        try:
-            self.sconfig = SessionStartupConfig.load(cfgfilename)
-        except:
-            try:
-                self.sconfig = convertSessionConfig(os.path.join(state_dir, 'sessconfig.pickle'), cfgfilename)
-                convertMainConfig(state_dir, os.path.join(state_dir, 'abc.conf'),
-                                  os.path.join(state_dir, 'tribler.conf'))
-            except:
-                self.sconfig = SessionStartupConfig()
-                self.sconfig.set_state_dir(state_dir)
-
-        self.sconfig.set_install_dir(self.installdir)
-
-        # Arno, 2010-03-31: Hard upgrade to 50000 torrents collected
-        self.sconfig.set_torrent_collecting_max_torrents(50000)
-
-        dlcfgfilename = get_default_dscfg_filename(self.sconfig.get_state_dir())
-        self._logger.debug("main: Download config %s", dlcfgfilename)
-        try:
-            defaultDLConfig = DefaultDownloadStartupConfig.load(dlcfgfilename)
-        except:
-            try:
-                defaultDLConfig = convertDefaultDownloadConfig(
-                    os.path.join(state_dir, 'dlconfig.pickle'), dlcfgfilename)
-            except:
-                defaultDLConfig = DefaultDownloadStartupConfig.getInstance()
-
-        if not defaultDLConfig.get_dest_dir():
-            defaultDLConfig.set_dest_dir(get_default_dest_dir())
-        if not os.path.isdir(defaultDLConfig.get_dest_dir()):
-            try:
-                os.makedirs(defaultDLConfig.get_dest_dir())
-            except:
-                # Could not create directory, ask user to select a different location
-                dlg = wx.DirDialog(None,
-                                   "Could not find download directory, please select a new location to store your downloads",
-                                   style=wx.DEFAULT_DIALOG_STYLE)
-                dlg.SetPath(get_default_dest_dir())
-                if dlg.ShowModal() == wx.ID_OK:
-                    new_dest_dir = dlg.GetPath()
-                    defaultDLConfig.set_dest_dir(new_dest_dir)
-                    defaultDLConfig.save(dlcfgfilename)
-                    self.sconfig.save(cfgfilename)
-                else:
-                    # Quit
-                    self.onError = lambda e: self._logger.error(
-                        "tribler: quitting due to non-existing destination directory")
-                    raise Exception()
-
-        if FORCE_ENABLE_TUNNEL_COMMUNITY:
-            self.sconfig.set_tunnel_community_enabled(True)
-
-        if not self.sconfig.get_tunnel_community_optin_dialog_shown() and not SKIP_TUNNEL_DIALOG:
-            optin_dialog = wx.MessageDialog(None,
-                                            'If you are not familiar with proxy technology, please opt-out.\n\n'
-                                            'This experimental anonymity feature using Tor-inspired onion routing '
-                                            'and multi-layered encryption.'
-                                            'You will become an exit node for other users downloads which could get you in '
-                                            'trouble in various countries.\n'
-                                            'This privacy enhancement will not protect you against spooks or '
-                                            'government agencies.\n'
-                                            'We are a torrent client and aim to protect you against lawyer-based '
-                                            'attacks and censorship.\n'
-                                            'With help from many volunteers we are continuously evolving and improving.'
-                                            '\n\nIf you aren\'t sure, press Cancel to disable the \n'
-                                            'experimental anonymity feature',
-                                            'Do you want to use the experimental anonymity feature?',
-                                            wx.ICON_WARNING | wx.OK | wx.CANCEL)
-            enable_tunnel_community = optin_dialog.ShowModal() == wx.ID_OK
-            self.sconfig.set_tunnel_community_enabled(enable_tunnel_community)
-            self.sconfig.set_tunnel_community_optin_dialog_shown(True)
-            optin_dialog.Destroy()
-            del optin_dialog
-
-        session = Session(self.sconfig, autoload_discovery=autoload_discovery)
-
-        # check and upgrade
-        upgrader = session.prestart()
-        if not upgrader.is_done:
-            upgrade_dialog = TriblerUpgradeDialog(self.gui_image_manager, upgrader)
-            failed = upgrade_dialog.ShowModal()
-            upgrade_dialog.Destroy()
-            if failed:
-                wx.MessageDialog(None, "Failed to upgrade the on disk data.\n\n"
-                                 "Tribler has backed up the old data and will now start from scratch.\n\n"
-                                 "Get in contact with the Tribler team if you want to help debugging this issue.\n\n"
-                                 "Error was: %s" % upgrader.current_status,
-                                 "Data format upgrade failed", wx.OK | wx.CENTRE | wx.ICON_EXCLAMATION).ShowModal()
-        return session
 
     def _frame_and_ready(self):
         return self.ready and self.frame and self.frame.ready
@@ -513,7 +447,7 @@ class ABCApp(object):
             dispersy.define_auto_load(ChannelCommunity, session.dispersy_member, load=True, kargs=default_kwargs)
             dispersy.define_auto_load(PreviewChannelCommunity, session.dispersy_member, kargs=default_kwargs)
 
-            if self.sconfig.get_tunnel_community_enabled():
+            if self.session.get_tunnel_community_enabled():
                 keypair = dispersy.crypto.generate_key(u"curve25519")
                 dispersy_member = dispersy.get_member(private_key=dispersy.crypto.key_to_bin(keypair),)
                 settings = TunnelSettings(session.get_install_dir())
@@ -970,7 +904,6 @@ class ABCApp(object):
         if self.frame:
             self.frame.Destroy()
             self.frame = None
-
         # Don't checkpoint, interferes with current way of saving Preferences,
         # see Tribler/Main/Dialogs/abcoption.py
         if self.utility:
@@ -984,7 +917,6 @@ class ABCApp(object):
                 torrent_db._db.clean_db(randint(0, 24) == 0, exiting=True)
             except:
                 print_exc()
-
             self.closewindow.tick('Shutdown session')
             self.utility.session.shutdown(hacksessconfcheckpoint=False)
 
@@ -1005,17 +937,14 @@ class ABCApp(object):
 
         self.closewindow.tick('Deleting instances')
         self._logger.debug("ONEXIT deleting instances")
-
         Session.del_instance()
         GUIUtility.delInstance()
         GUIDBProducer.delInstance()
         DefaultDownloadStartupConfig.delInstance()
         GuiImageManager.delInstance()
-
         self.closewindow.tick('Exiting now')
 
         self.closewindow.Destroy()
-
         return 0
 
     def db_exception_handler(self, e):
@@ -1028,7 +957,6 @@ class ABCApp(object):
         except:
             self._logger.error("db_exception_handler error %s %s", e, type(e))
             print_exc()
-            # print_stack()
 
         self.onError(e)
 
@@ -1071,20 +999,117 @@ class ABCApp(object):
 
             wx.CallAfter(start_asked_download)
 
+#
+# abcapp.py ends here
 
-#
-#
-# Main Program Start Here
-#
-#
-@attach_profiler
-def run(params=None, autoload_discovery=True):
-    if params is None:
-        params = [""]
 
+class SessionRunner(object):
+    """
+    Holds The session and components.
+
+    Note that this is a temporary class, in the future, a Session class should
+    handle the components by itself.
+
+    """
+    def __init__(self):
+        self.session = None
+        self.app = None
+        self._components = OrderedDict()
+        self.status = "stopped"
+
+    # TODO(emilon): I guess @attach_profiler should be moved to the mainloop
+    # function in the gui component now
+    @attach_profiler
+    def start(self, params=[""], async=False, autoload_discovery=True):
+        return self._do_start(params, autoload_discovery=autoload_discovery)
+
+    def wait_for_start(self, autoload_discovery=True):
+        self._do_start()
+
+        # TODO(emilon): block for a running deferred instead of this.
+        for _ in xrange(300):
+            sleep(0.1)
+            if self.status == "running":
+                return
+        raise RuntimeError("Timeout waiting for start")
+
+    @blocking_call_on_reactor_thread
+    @inlineCallbacks
+    def run(self, params=[""], autoload_discovery=True):
+
+
+        yield self._do_start(params, autoload_discovery)
+        result = yield self.getComponent("WxGUIComponent").shutdown_d
+        returnValue(result)
+
+    def stop(self):
+        return self._do_stop()
+
+    def wait_for_stop(self):
+        assert not isInIOThread()
+
+        self.stop()
+        # TODO(emilon): block for a stopped deferred instead of this.
+        for _ in xrange(300):
+            sleep(0.1)
+            if self.status == "stopped":
+                return
+        raise RuntimeError("Timeout waiting for stop")
+
+
+
+
+    def getComponent(self, component_name):
+        return self._components[component_name]
+
+    def hasComponent(self, component_name):
+        return component_name in self._components
+
+    def registerComponent(self, component):
+        component_name = component.__class__.__name__
+        if component_name in self._components:
+            raise ValueError("A component of this type has already been registered: %s %s", component_name, repr(self._components[component_name]))
+        else:
+            self._components[component_name] = component
+
+    @call_on_reactor_thread
+    @inlineCallbacks
+    def _do_start(self, params, autoload_discovery):
+        self.status = "starting"
+        from Tribler.Main.vwxGUI.wxgui_component import WxGUIComponent
+
+        # TODO(emilon): session and sconfig shouldn't be created by upgradercomponent
+        upgrader = UpgraderComponent(None, autoload_discovery)
+        self.registerComponent(upgrader)
+        yield upgrader.start()
+        self.session = upgrader.session
+        # TODO(emilon): params should not be passed to the GUI but to the session
+        gui = WxGUIComponent(self.session, params)
+        self.registerComponent(gui)
+        yield gui.start()
+        self.app = gui.app
+        self.status = "running"
+
+    @call_on_reactor_thread
+    def _async_do_start(self, *argv, **kwargs):
+        # We are on the reactor thread, so _do_start() will just return a Deferred
+        return self._do_start(*argv, **kwargs)
+
+    @call_on_reactor_thread
+    @inlineCallbacks
+    def _do_stop(self):
+        self.status = "stopping"
+        for component in reversed(self._components.values()):
+            yield component.stop()
+        self.status = "stopped"
+
+def run():
     if len(sys.argv) > 1:
         params = sys.argv[1:]
+    else:
+        params = [""]
     try:
+        #from Tribler.Main.vwxGUI.abcapp import ABCApp
         # Create single instance semaphore
         single_instance_checker = SingleInstanceChecker("tribler")
 
@@ -1097,54 +1122,21 @@ def run(params=None, autoload_discovery=True):
             if params[0] != "":
                 torrentfilename = params[0]
                 i2ic = Instance2InstanceClient(
-                    Utility(
-                        installdir,
-                        statedir).read_config(
-                            'i2ilistenport'),
+                    Utility(installdir, statedir).read_config('i2ilistenport'),
                     'START',
                     torrentfilename)
 
             logger.info("Client shutting down. Detected another instance.")
         else:
-
-            if sys.platform == 'linux2' and os.environ.get("TRIBLER_INITTHREADS", "true").lower() == "true":
-                try:
-                    import ctypes
-                    x11 = ctypes.cdll.LoadLibrary('libX11.so.6')
-                    x11.XInitThreads()
-                    os.environ["TRIBLER_INITTHREADS"] = "False"
-                except OSError as e:
-                    logger.debug("Failed to call XInitThreads '%s'", str(e))
-                except:
-                    logger.exception('Failed to call xInitThreads')
-
-            # Launch first abc single instance
-            app = wx.GetApp()
-            if not app:
-                app = wx.PySimpleApp(redirect=False)
-            abc = ABCApp(params, installdir, autoload_discovery=autoload_discovery)
-            if abc.frame:
-                app.SetTopWindow(abc.frame)
-                abc.frame.set_wxapp(app)
-                app.MainLoop()
-
-            # since ABCApp is not a wx.App anymore, we need to call OnExit explicitly.
-            abc.OnExit()
-
+            SessionRunner().run(params)
             # Niels: No code should be present here, only executed after gui closes
 
+        # TODO(emilon): This can go away once the componentization is finished
         logger.info("Client shutting down. Sleeping for a few seconds to allow other threads to finish")
         sleep(5)
 
     except:
         print_exc()
-
-    # This is the right place to close the database, unfortunately Linux has
-    # a problem, see ABCFrame.OnCloseWindow
-    #
-    # if sys.platform != 'linux2':
-    #    tribler_done(configpath)
-    # os._exit(0)
 
 if __name__ == '__main__':
     run()

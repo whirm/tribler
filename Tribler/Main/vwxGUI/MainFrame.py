@@ -133,6 +133,7 @@ class MainFrame(wx.Frame):
         self.category = Category.getInstance()
         self.shutdown_and_upgrade_notes = None
 
+        self.videoframe = None
         self.guiserver = GUITaskQueue.getInstance()
 
         title = "Tribler %s" % version_id
@@ -872,6 +873,7 @@ class MainFrame(wx.Frame):
         for t in ts:
             self._logger.info("mainframe: Thread still running %s daemon %s", t.getName(), t.isDaemon())
 
+        print_stack()
         self._logger.info('GUI closed')
 
     @forceWxThread
@@ -1005,6 +1007,7 @@ class MainFrame(wx.Frame):
                 app.ExitMainLoop()
                 wx.WakeUpMainThread()
 
-            wx.CallLater(1000, doexit)
+            #wx.CallLater(5000, doexit)
             if force:
-                wx.CallLater(2500, app.Exit)
+                pass
+                #wx.CallLater(2500, app.Exit)
