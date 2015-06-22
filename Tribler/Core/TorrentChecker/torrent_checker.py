@@ -23,6 +23,8 @@ DEFAULT_TORRENT_CHECK_INTERVAL = 900  # base multiplier for the check delay
 DEFAULT_MAX_TORRENT_CHECK_RETRIES = 8  # max check delay increments when failed.
 DEFAULT_TORRENT_CHECK_RETRY_INTERVAL = 30  # interval when the torrent was successfully checked for the last time
 
+CHECKER_JOIN_TIMEOUT = 2
+
 
 class TorrentCheckerThread(Thread):
 
@@ -121,13 +123,11 @@ class TorrentChecker(TaskManager):
         Once shut down it can't be started again.
         """
         # stop the checking thread first because it can block on the reactor thread
-        join_timeout = 10.0  # 10 seconds should be way sufficient
-
         self._should_stop = True
         self._checker_thread.interrupt()
-        self._checker_thread.join(join_timeout)  # do not block forever
+        self._checker_thread.join(CHECKER_JOIN_TIMEOUT)
         if self._checker_thread.is_alive():
-            self._logger.critical("_checker_thread.join(%s) timed out.", join_timeout)
+            self._logger.error("_checker_thread.join(%d) timed out.", CHECKER_JOIN_TIMEOUT)
         self._checker_thread = None
 
         # it's now safe to block on the reactor thread
