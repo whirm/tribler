@@ -11,7 +11,7 @@ from Tribler.Core.simpledefs import (NTFY_TORRENTS, NTFY_PLAYLISTS, NTFY_COMMENT
                                      NTFY_TRACKERINFO, NTFY_UPDATE, NTFY_INSERT, NTFY_DELETE, NTFY_TUNNEL,
                                      NTFY_UPGRADER,
                                      SIGNAL_ALLCHANNEL_COMMUNITY, SIGNAL_SEARCH_COMMUNITY, SIGNAL_TORRENT,
-                                     SIGNAL_CHANNEL, SIGNAL_CHANNEL_COMMUNITY)
+                                     SIGNAL_CHANNEL, SIGNAL_CHANNEL_COMMUNITY, SIGNAL_RSS_FEED)
 
 
 class Notifier(object):
@@ -20,7 +20,7 @@ class Notifier(object):
                 NTFY_MODERATIONS, NTFY_MARKINGS, NTFY_MYPREFERENCES, NTFY_ACTIVITIES, NTFY_REACHABLE, NTFY_CHANNELCAST,
                 NTFY_VOTECAST, NTFY_DISPERSY, NTFY_TRACKERINFO, NTFY_TUNNEL, NTFY_UPGRADER,
                 SIGNAL_ALLCHANNEL_COMMUNITY, SIGNAL_SEARCH_COMMUNITY, SIGNAL_TORRENT, SIGNAL_CHANNEL,
-                SIGNAL_CHANNEL_COMMUNITY]
+                SIGNAL_CHANNEL_COMMUNITY, SIGNAL_RSS_FEED]
 
     def __init__(self, use_pool):
         self._logger = logging.getLogger(self.__class__.__name__)
