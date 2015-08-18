@@ -2135,32 +2135,30 @@ class CreditMiningList(SizeList):
             if self.statefilter != None:
                 self.list.SetData()  # basically this means execute filter again
 
-        boosting_dslist = [ds for ds in dslist if ds.get_download().get_def().get_id() in new_keys]
-
+        boosting_dslist = [ds for ds in dslist if ds.get_download().get_def().get_infohash() in new_keys]
         for item in self.list.items.itervalues():
             ds = item.original_data.ds
-            torrent_ds, _ = item.original_data.dslist if ds else (None, None)
-            if torrent_ds:
+            if ds:
 
-                if not torrent_ds in boosting_dslist:
+                if not ds in boosting_dslist:
                     continue
 
-                if torrent_ds.get_seeding_statistics():
-                    seeding_stats = torrent_ds.get_seeding_statistics()
+                if ds.get_seeding_statistics():
+                    seeding_stats = ds.get_seeding_statistics()
                     bytes_up = seeding_stats['total_up']
                     bytes_down = seeding_stats['total_down']
 
-                    item.RefreshColumn(1, self.utility.size_format(bytes_up) + ' / ' + self.utility.size_format(bytes_down))
+                    item.RefreshColumn(1, size_format(bytes_up) + ' / ' + size_format(bytes_down))
 
                 item.SetSelectedColour(wx.Colour(255, 175, 175))
                 item.SetDeselectedColour(wx.Colour(255, 200, 200))
                 item.SetExpandedColour(wx.Colour(255, 150, 150))
                 item.SetExpandedAndSelectedColour(wx.Colour(255, 125, 125))
 
-                speed_up = torrent_ds.get_current_speed('up') if torrent_ds else 0
-                speed_down = torrent_ds.get_current_speed('down') if torrent_ds else 0
+                speed_up = ds.get_current_speed('up') if ds else 0
+                speed_down = ds.get_current_speed('down') if ds else 0
 
-                item.RefreshColumn(0, self.utility.speed_format(speed_up) + ' / ' + self.utility.speed_format(speed_down))
+                item.RefreshColumn(0, speed_format(speed_up) + ' / ' + speed_format(speed_down))
 
             else:
                 item.SetSelectedColour(LIST_SELECTED)
@@ -2174,11 +2172,11 @@ class CreditMiningList(SizeList):
             item.RefreshColumn(3, ('*' if is_dup else '**') if is_dup != None else '')
 
         seeding_stats = [ds.get_seeding_statistics() for ds in boosting_dslist if ds.get_seeding_statistics()]
-        self.b_up.SetLabel('Total bytes up: ' + self.utility.size_format(sum([stat['total_up'] for stat in seeding_stats])))
-        self.b_down.SetLabel('Total bytes down: ' + self.utility.size_format(sum([stat['total_down'] for stat in seeding_stats])))
+        self.b_up.SetLabel('Total bytes up: ' + size_format(sum([stat['total_up'] for stat in seeding_stats])))
+        self.b_down.SetLabel('Total bytes down: ' + size_format(sum([stat['total_down'] for stat in seeding_stats])))
 
-        self.s_up.SetLabel('Total speed up: ' + self.utility.speed_format(sum([ds.get_current_speed('up') for ds in boosting_dslist])))
-        self.s_down.SetLabel('Total speed down: ' + self.utility.speed_format(sum([ds.get_current_speed('down') for ds in boosting_dslist])))
+        self.s_up.SetLabel('Total speed up: ' + speed_format(sum([ds.get_current_speed('up') for ds in boosting_dslist])))
+        self.s_down.SetLabel('Total speed down: ' + speed_format(sum([ds.get_current_speed('down') for ds in boosting_dslist])))
 
         if newFilter:
             self.newfilter = False
