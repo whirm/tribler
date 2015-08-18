@@ -171,7 +171,9 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
                 self._logger.debug(u"setup: initialdlstatus %s %s", hexlify(self.tdef.get_infohash()), initialdlstatus)
 
-                self.create_engine_wrapper(lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=initialdlstatus, wrapperDelay=wrapperDelay, share_mode=share_mode)
+                self.create_engine_wrapper(lm_network_engine_wrapper_created_callback, pstate,
+                                           initialdlstatus=initialdlstatus, wrapperDelay=wrapperDelay,
+                                           share_mode=share_mode)
 
             self.pstate_for_restart = pstate
 
