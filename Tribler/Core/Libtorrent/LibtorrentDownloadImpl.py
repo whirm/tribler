@@ -142,9 +142,10 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         self.askmoreinfo = False
 
         self.correctedinfoname = u""
+        self.checkpoint_disabled = False
 
     def __str__(self):
-        return "LibtorrentDownloadImpl <name: '%s' hops: %d hide: %d>" % (self.correctedinfoname, self.get_hops(), self.hide)
+        return "LibtorrentDownloadImpl <name: '%s' hops: %d checkpoint_disabled: %d>" % (self.correctedinfoname, self.get_hops(), self.checkpoint_disabled)
 
     def __repr__(self):
         return self.__str__()
@@ -152,7 +153,14 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
     def get_def(self):
         return self.tdef
 
-    def setup(self, dcfg=None, pstate=None, initialdlstatus=None, lm_network_engine_wrapper_created_callback=None, wrapperDelay=0, share_mode=False):
+    def set_checkpoint_disabled(self, val=True):
+        self.checkpoint_disabled = val
+
+    def get_checkpoint_disabled(self):
+        return self.checkpoint_disabled
+
+    def setup(self, dcfg=None, pstate=None, initialdlstatus=None, lm_network_engine_wrapper_created_callback=None,
+              wrapperDelay=0, share_mode=False, checkpoint_disabled=False):
         """
         Create a Download object. Used internally by Session.
         @param dcfg DownloadStartupConfig or None (in which case
@@ -160,6 +168,8 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
         becomes the runtime config of this Download.
         """
         # Called by any thread, assume sessionlock is held
+        self.set_checkpoint_disabled(checkpoint_disabled)
+
         try:
             with self.dllock:
                 # Copy dlconfig, from default if not specified
@@ -181,7 +191,7 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
                 self.create_engine_wrapper(lm_network_engine_wrapper_created_callback, pstate,
                                            initialdlstatus=initialdlstatus, wrapperDelay=wrapperDelay,
-                                           share_mode=share_mode)
+                                           share_mode=share_mode, checkpoint_disabled=checkpoint_disabled)
 
             self.pstate_for_restart = pstate
 
@@ -190,7 +200,8 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
                 self.error = e
                 print_exc()
 
-    def create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None, wrapperDelay=0, share_mode=False):
+    def create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None,
+                              wrapperDelay=0, share_mode=False, checkpoint_disabled=False):
         with self.dllock:
             if not self.cew_scheduled:
                 self.ltmgr = self.session.lm.ltmgr
@@ -202,17 +213,19 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
                 if not self.ltmgr or not dht_ok or not session_ok:
                     self._logger.info(u"LTMGR/DHT/session not ready, rescheduling create_engine_wrapper")
-                    create_engine_wrapper_lambda = lambda: self.create_engine_wrapper(
-                        lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=initialdlstatus, share_mode=share_mode)
-                    self.session.lm.threadpool.add_task(create_engine_wrapper_lambda, 5)
+                    self.session.lm.threadpool.call(5, self.create_engine_wrapper,
+                                                    lm_network_engine_wrapper_created_callback, pstate,
+                                                    initialdlstatus=initialdlstatus, share_mode=share_mode,
+                                                    checkpoint_disabled=checkpoint_disabled)
                     self.dlstate = DLSTATUS_CIRCUITS if not session_ok else DLSTATUS_METADATA
                 else:
-                    network_create_engine_wrapper_lambda = lambda: self.network_create_engine_wrapper(
-                        lm_network_engine_wrapper_created_callback, pstate, initialdlstatus, share_mode=share_mode)
-                    self.session.lm.threadpool.add_task(network_create_engine_wrapper_lambda, wrapperDelay)
+                    self.session.lm.threadpool.call(wrapperDelay, self.network_create_engine_wrapper,
+                                                    lm_network_engine_wrapper_created_callback, pstate, initialdlstatus,
+                                                    share_mode=share_mode, checkpoint_disabled=checkpoint_disabled)
                     self.cew_scheduled = True
 
-    def network_create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None, share_mode=False):
+    def network_create_engine_wrapper(self, lm_network_engine_wrapper_created_callback, pstate, initialdlstatus=None,
+                                      share_mode=False, checkpoint_disabled=False):
         # Called by any thread, assume dllock already acquired
         self._logger.debug("LibtorrentDownloadImpl: create_engine_wrapper()")
 
@@ -226,6 +239,8 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
         if share_mode:
             atp["flags"] = lt.add_torrent_params_flags_t.flag_share_mode
+
+        self.set_checkpoint_disabled(checkpoint_disabled)
 
         resume_data = pstate.get('state', 'engineresumedata') if pstate else None
         if not isinstance(self.tdef, TorrentDefNoMetainfo):
@@ -962,9 +977,12 @@ class LibtorrentDownloadImpl(DownloadConfigInterface):
 
     def checkpoint(self):
         """ Called by any thread """
-        (infohash, pstate) = self.network_checkpoint()
-        checkpoint = lambda: self.session.lm.save_download_pstate(infohash, pstate)
-        self.session.lm.threadpool.add_task(checkpoint, 0)
+        if self.checkpoint_disabled:
+            self._logger.warning("Ignoring checkpoint() call as is checkpointing disabled for this download.")
+        else:
+            (infohash, pstate) = self.network_checkpoint()
+            checkpoint = lambda: self.session.lm.save_download_pstate(infohash, pstate)
+            self.session.lm.threadpool.add_task(checkpoint, 0)
 
     def network_checkpoint(self):
         """ Called by network thread """

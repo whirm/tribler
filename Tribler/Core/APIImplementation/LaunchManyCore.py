@@ -252,11 +252,10 @@ class TriblerLaunchMany(TaskManager):
 
         self.initComplete = True
 
-    def add(self, tdef, dscfg, pstate=None, initialdlstatus=None, setupDelay=0, hidden=False, share_mode=False):
+    def add(self, tdef, dscfg, pstate=None, initialdlstatus=None, setupDelay=0, hidden=False, share_mode=False, checkpoint_disabled=False):
         """ Called by any thread """
         d = None
-        self.sesslock.acquire()
-        try:
+        with self.sesslock:
             if not isinstance(tdef, TorrentDefNoMetainfo) and not tdef.is_finalized():
                 raise ValueError("TorrentDef not finalized")
 
@@ -278,10 +277,7 @@ class TriblerLaunchMany(TaskManager):
             # Store in list of Downloads, always.
             self.downloads[infohash] = d
             d.setup(dscfg, pstate, initialdlstatus, self.network_engine_wrapper_created_callback,
-                    wrapperDelay=setupDelay, share_mode=share_mode)
-
-        finally:
-            self.sesslock.release()
+                    wrapperDelay=setupDelay, share_mode=share_mode, checkpoint_disabled=checkpoint_disabled)
 
         if d and not hidden and self.session.get_megacache():
             @forceDBThread
@@ -305,7 +301,7 @@ class TriblerLaunchMany(TaskManager):
     def network_engine_wrapper_created_callback(self, d, pstate):
         """ Called by network thread """
         try:
-            if pstate is None:
+            if pstate is None and not d.get_checkpoint_disabled():
                 # Checkpoint at startup
                 (infohash, pstate) = d.network_checkpoint()
                 self.save_download_pstate(infohash, pstate)
@@ -531,7 +527,7 @@ class TriblerLaunchMany(TaskManager):
         # Download, and additions are no problem (just won't be included
         # in list of states returned via callback.
         #
-        dllist = self.downloads.values()
+        dllist = [dl for dl in self.downloads.values() if not dl.checkpoint_disabled]
         self._logger.debug("tlm: checkpointing %s stopping %s", len(dllist), stop)
 
         network_checkpoint_callback_lambda = lambda: self.network_checkpoint_callback(dllist, stop, checkpoint,
