@@ -145,6 +145,7 @@ def find_lib():
                         plugin_path = os.path.dirname(p)
                         break
             if plugin_path is not None:  # try loading
+                print >> sys.stderr, "PLUGIN PATH IS ", plugin_path
                 p = os.getcwd()
                 os.chdir(plugin_path)
                  # if chdir failed, this will raise an exception
