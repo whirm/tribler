@@ -115,6 +115,8 @@ def find_lib():
                 return None
             finally:
                 # restore cwd after dll has been loaded
+                import sys
+                print >> sys.stderr, "GOING BACK TO ", old_path
                 os.chdir(old_path)
         p = None
         if p is None:
